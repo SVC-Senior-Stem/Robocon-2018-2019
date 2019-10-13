@@ -1,0 +1,380 @@
+'''
+This is the final version of the code
+If you create your own version of it (forking), please attach it to the card 
+that this repl is linked to, with a different name and a description
+of the changes you made
+Any changes to this code will either be agreed upon and done by person 
+or they will be done in a multiplayer session
+
+
+USAGE NOTES
+
+1. to read cubes, use the following functions in this order:
+  R.see()
+  look()
+2. If you want to find the best cube use:
+decisionMaking.prioritise_cubes()
+
+TO DO:
+change perimeterMarkers.returnHomeWithMarkers() to account for whales weird parking, Robert could do that
+
+Add global variable declarations (probably done)
+
+
+Possible:
+
+Use a negative value for distance_to_collection_point (for whale) to get it to move further than needed to collect cubes, effectively removing the need for collect_cubes()
+  Pros:
+    Would remove another function
+    Might speed up program
+    Nice trick
+  Cons:
+    Harder to read
+    Sort of unnecessary
+
+'''
+
+
+#imports
+import robot  #(Imports the robot code, will cause a bug if uncommented)
+import time
+import math
+R = robot.Robot()
+
+#variables
+cubes_priorities = []
+distance_to_collection_point = 0.2      # distance from camera to colletion point in meters
+arena_tokens = []
+cubes = []
+wheel_speed = 10  #integer for speed of wheels
+robot_speed = 0.08   #speed of robot, in meters/speed USE METERS
+robot_turn_speed = 10
+home_markers = []
+arena_tokens_codes = []
+end_seconds = 120 # change as needed
+
+
+#classes and functions
+
+class Wheels:
+
+
+  def __init__(self):
+    print("Wheels")
+  
+
+  def turn(self, angle):
+    
+    # time = distance/ angles turned every second
+    seconds = angle/robot_turn_speed
+    
+    # if the angle is negative, turn the other way
+    if seconds >= 0:
+        R.motors[0] = speed
+        R.motors[1] = -speed
+        time.sleep(seconds)
+        self.stop()
+
+    else:
+
+        R.motors[0] = -speed
+        R.motors[1] = speed
+        time.sleep(seconds)
+        self.stop()
+    
+    print("turning")
+  
+
+  def stop(self):
+    # stops all motors
+    R.motors[1] = 0
+    R.motors[2] = 0
+    print("stopping")
+
+
+  def move(self, distance):
+    # moves the specified distance
+    R.motors[1] = wheel_speed
+    R.motors[2] = wheel_speed
+    # time = distance / speed
+    time.sleep((distance/robot_speed))
+    self.stop()
+    print("moving")
+
+
+  def park(self):
+    wheels.tunr(90)
+    print("PARKING")
+
+class PerimeterMarkers:
+
+
+  def __init__(self):
+    # defines the different home markers for each starting zone
+    if R.zone == 0:
+      home_markers = [2,3]
+
+    elif R.zone == 1:
+      home_markers = [8,9]
+
+    elif R.zone == 2:
+      home_markers = [14,15]
+
+    else:
+      home_markers = [21,20]
+      
+    print("PerimeterMarkers")
+  
+
+  def returnHomeWithMarkers():
+    distance_before_parking = 1 #distance to sopt before running the parking function
+    # returns home by looking for the home markers on the visible walls
+    global markers
+
+    print("returning")
+    while returning == True:
+      # take a picture at the highest resolution
+      markers = R.see()
+      time.sleep(0.5)
+      # filters the markers
+      decisionMaking.filter_markers()
+      
+      # if the one of the markers is visible, turn the angle and move the distance to the marker
+      if home_markers[0] in arena_tokens_codes:
+        wheels.turn(arena_tokens[arena_tokens_codes.index(home_markers[0])].rot_y)
+        wheels.move(arena_tokens[arena_tokens_codes.index(home_markers[0])].dist-distance_before_parking)
+        returning = False
+        RUNNING = False
+        wheels.park()
+      
+      elif home_markers[1] in arena_tokens_codes:
+        wheels.turn(arena_tokens[arena_tokens_codes.index(home_markers[1])].rot_y)
+        wheels.move(arena_tokens[arena_tokens_codes.index(home_markers[1])].dist-distance_before_parking)
+        returning = False     
+        RUNNING = False
+        wheels.park()
+      
+      else:
+        # turn the robot a little bit 
+        wheels.turn(20)
+
+
+class DecisionMaking:
+
+
+  def __init__(self):
+    print("DecisionMaking")
+
+
+  def prioritise_cubes(self):
+    # sorts the cubes by points/distance
+    print("prioritising cubes")
+    global target_cube
+    global target_cube_code
+    print("prioritise_cubes")
+
+    if len(cubes) != 0 :
+      for m in cubes:
+        # if the marker is gold, set the temp value to 7(its score), or if it is gold, set the value to 5
+        
+        if m.info.token_type == robot.TOKEN_GOLD:#ASK THEM the right documentation.
+          cubes_priorities.append(7/(m.dist))
+        
+        elif m.info.token_type == robot.TOKEN_ORE:
+          cubes_priorities.append(5/(m.dist))
+        
+        else:
+          #reposition, no cubes or only fool's gold
+          print("repostion")
+        #for every cube, calculate the optimisation value
+      # create an object from the object in the list of markers with the id of the highest value in the list of optimisation values 
+
+      target_cube = cubes[cubes_priorities.index(max(cubes_priorities))]
+      target_cube_code = target_cube.info.code
+ 
+
+  def find_time(self):
+    # reads the most recent marker and finds the current time, using the datetime function could be better, like in Robert's code
+    # tbh, I like using this
+    return(round(markers[0].timestamp))
+    print("finding time")
+ 
+
+  def time_check(self):
+    # checks if the robot should return home
+    # in a function to make it look nicer
+    print("checking time")
+
+    if start_time-current_time == end_seconds:
+      perimeterMarkers.returnHomeWithMarkers()
+  
+
+  def sort_cubes_by_distance(self, blobs):
+    print("sorting cubes by distance")
+    # returns the a list of objects sorted by their distances 
+    return(sorted(blobs, key=lambda x: x.dist))
+  
+  def filter_markers(self):
+    # splits the list markers intoa arena_tokens and cubes
+    print("filtering markers")
+    global arena_tokens
+    global cubes
+    global arena_tokens_codes
+    
+    arena_tokens = [m for m in markers if m.info.marker_type == "MARKER_ARENA"]
+    cubes = [m for m in markers if m.info.marker_type == "MARKER_TOKEN"]
+    # MARKER_ARENA might be a string
+    arena_tokens_codes = [m.info.code for m in arena_tokens]
+
+
+  def adjust_angles(self, marker):
+    # adjusts the distance of the given markers becuase apparently it was a good idea to elevate the brain box
+    print("adjusting angles")
+    # adjust the elevation to be the distance of the camera from the ground to the center of the cubes, as that is where .dist reads from
+    # centre of cubes are 5.5cm above ground
+    elevation = 0.15
+    hypotenuse = marker.dist
+    b  = elevation
+    # everyones favourite greek mathematician!
+    a  = math.sqrt((hypotenuse*hypotenuse)-(b*b))
+    return(a)
+
+
+  def removeDuplicates(blobs):
+    # removes duplicate cubes
+    print("Removing duplicates")
+
+    blob_codes  = [i.info.code for i in blobs]  #list of codes of markers
+    final_output = []
+
+    blob_codes_set = list(set(blob_codes))  #unqiue list of codes
+
+    for blob_code in blob_codes_set:
+      duplicates = [i for i in blobs if i.info.code == blob_code] #get list of duplicates for the current iteration 
+      #sorts the list of duplicates so that the closest one is at position 0
+      duplicates = sorted(duplicates, key=lambda x: x.dist) 
+      #add the closest one to the final list
+      final_output.append(duplicates[0])
+
+    return(final_output)
+
+
+class Testing:
+  #for measuring values that will change a lot, such as speed
+
+  def __init__(self):
+    print("Testing")
+
+
+  def test_speed(self):
+    markers = R.see(res=(1920, 1088))
+    time.sleep(5)
+
+    for m in markers:
+      start_distance = m.dist
+
+    R.motors[1] = wheel_speed
+    R.motors[2] = wheel_speed
+    time.sleep(5)
+    R.motors[1] = 0
+    R.motors[2] = 0
+    markers = R.see(res=(1920, 1088))
+    time.sleep(5)
+
+    for m in markers:
+      end_distance = m.dist
+
+    final_distance = (start_distance-end_distance)
+    print("final_distance is "+str(final_distance))
+    print("rounded, final_distance is "+str(round(final_distance, 3)))
+
+
+  def test_turn(self):
+    print("test_turn")
+
+
+# code for collecting cubes:
+def collect_cubes():
+  #for whale:
+  print("TO DO")
+
+
+#create objects
+
+wheels = Wheels()
+perimeterMarkers = PerimeterMarkers()
+decisionMaking = DecisionMaking()
+crabDelivery = CrabDelivery()
+crabArms = CrabArms()
+whaleCubeCollection = WhaleCubeCollection()
+testing = Testing()
+
+
+# complaiton functions
+
+def look():
+  markers = R.see()
+  current_time = decisionMaking.find_time()
+  decisionMaking.filter_markers()
+  # catches when no cubes
+
+  while len(cubes) == 0:
+    time.sleep(5)
+    markers = R.see(res=(1920, 1088))
+    current_time = decisionMaking.find_time()
+    decisionMaking.time_check()
+    decisionMaking.filter_markers()
+    break
+
+  cubes = decisionMaking.removeDuplicates(cubes)
+  # only for whale:
+
+  for m in cubes:
+    m.dist = decisionMaking.adjust_angles(m)
+
+
+def start_look():
+  start_time = decisionMaking.find_time()
+  decisionMaking.filter_markers()
+
+  while len(cubes) == 0:
+    time.sleep(5)
+    markers = R.see(res=(1920, 1088))
+    current_time = decisionMaking.find_time()
+    decisionMaking.filter_markers()
+
+  cubes = decisionMaking.removeDuplicates(cubes)
+  # only for whale:
+
+  for m in cubes:
+    m.dist = decisionMaking.adjust_angles(m)
+
+
+#running code
+
+def start():
+  markers = R.see(res=(1920, 1088))
+  start_look()
+
+  decisionMaking.prioritise_cubes()
+  wheels.turn(decisionMaking.target_cube.rot_y)
+  wheels.move(decisionMaking.target_cube.dist-distance_to_collection_point)
+  collect_cubes()
+  main()
+
+
+def main():
+
+  while RUNNING:
+    look()
+    decisionMaking.time_check()
+    decisionMaking.prioritise_cubes()
+    wheels.turn(decisionMaking.target_cube.rot_y)
+    wheels.move(decisionMaking.target_cube.dist-distance_to_collection_point)
+    collect_cubes()
+
+
+RUNNING = True
+
+
+start()
