@@ -1,0 +1,572 @@
+#I need to have something checking the robot never accidentally picks up cubes that it doesn't want to. Stage 3 is the parking.
+#11Apr 12:51
+
+import robot
+import time
+import random
+import math
+
+R = robot.Robot()
+
+#The following are constants depending on the arena
+isTesting = False
+if isTesting:
+  arenaSize = 3860
+  markersPerWall = 4
+  distBetweenWallMarkers = 1000
+  firstMarkerDistFromWall = 430
+  roundLength = 120
+  arenaQrSize = 250
+  cubeQrSize = 84
+  arenaMarkerHeight = arenaQrSize + 100
+else:
+  arenaSize = 6000
+  markersPerWall = 6
+  distBetweenWallMarkers = 1000
+  firstMarkerDistFromWall = 500
+  roundLength = 180
+  arenaQrSize = 250
+  cubeQrSize = 83
+  arenaMarkerHeight = arenaQrSize + 100
+
+timeToGoHome = 60
+cubeWidth = 110
+fieldOfView = 60
+
+assert firstMarkerDistFromWall == ((arenaSize - (markersPerWall - 1) * distBetweenWallMarkers) / 2)
+
+#The following depend on the robot
+isWhale = False
+if isWhale:
+  speed = 75
+  delta = 8     # adjustment to motor speed to drive straight
+  robotHeight = 200
+  robotWidth = 400
+  minViewingDistance = 200
+  maxViewingDistance = 1500
+  distance_to_collection_point = 200
+  minTurnAngle = 3
+  lostCubeDistance = 300
+  drivingStepDistance = 300
+  maxCubeCount = 5
+  panicDist = 500
+  panicAngle = 90
+  isStuckAngle = 5*360
+  isStuckNumber = 50
+else:
+  isCrab = True
+  speed = 75
+  delta = 0     # adjustment to motor speed to drive straight
+  robotHeight = 310
+  robotWidth = 370
+  minViewingDistance = 200
+  maxViewingDistance = 2000
+  distance_to_collection_point = -200
+  minTurnAngle = 1
+  lostCubeDistance = 0
+  drivingStepDistance = 1000
+  maxCubeCount = 10
+  panicDist = 500
+  panicAngle = 90
+  isStuckAngle = 2.5*360
+
+#The following should depend on the zone:
+#but doesn't matter for cube finding
+robotX = 0
+robotY = 0
+robotAngle = 0
+
+if R.zone == 0:
+  home_markers = [2,3]
+elif R.zone == 1:
+  home_markers = [8,9]
+elif R.zone == 2:
+  home_markers = [14,15]
+else:
+  home_markers = [20,21]
+
+#Global variables
+startTime = time.time()
+homeTime = startTime + roundLength - timeToGoHome
+
+driving = False
+lastPositionTimestamp = time.time()    #! should update now
+cubeCount = 0
+
+#An array of turn speeds and drive speeds indexed by the number of cubes we have collected
+if isWhale:
+  driveSpeeds = [500.0,4000.0,250.0,125.0,50.0]
+  driveSpeed = 500.0
+else:
+  driveSpeeds = [435,435,435,435,435,435,435,435,435,435,435,435]
+  driveSpeed = 435.0
+
+if isTesting:
+  homeRouteA = [[600,600],[200,1000],[200,2500]]
+  homeRouteB = [[600,3260],[200,3000],[200,1500]]
+else:
+  homeRouteA = [[750,750],[200,1500],[200,3500]]
+  homeRouteB = [[750,5250],[200,4500],[200,2500]]
+
+
+#Distance functions
+def adjustDist(m):
+  dist = m.dist
+  dist = dist*1000
+  if m.info.marker_type == robot.MARKER_TOKEN:
+    a = dist**2-(robotHeight-cubeWidth/2)**2
+  else:
+    #The distance needs to be scaled by the size of the arena markers
+    dist = dist * arenaQrSize/cubeQrSize
+    a = dist**2-(robotHeight-arenaMarkerHeight/2)**2
+  dist = math.sqrt(a)
+  return dist
+
+def updatePositionFromArena(m): #This gets your X,Y coordinates from edge markers.
+    global robotX
+    global robotY
+    global robotAngle
+    dist = adjustDist(m)
+    robotAngle = -m.orientation.rot_y
+    x = m.rot_y
+    markerAngle = m.rot_y - m.orientation.rot_y
+    a = math.cos(math.radians(markerAngle))*dist
+    b = math.sin(math.radians(markerAngle))*dist
+    #print "DI{0} RA{1} MA{2}".format(x, robotAngle, markerAngle)
+    code = m.info.code
+    mno = code%markersPerWall
+    side = code//markersPerWall
+    #print "{0}/{1}".format(code, side)
+    markerX = firstMarkerDistFromWall+(distBetweenWallMarkers*mno)
+    c = markerX-b
+    if side == 0:
+        robotX = a
+        robotY = arenaSize-c
+        robotAngle = robotAngle - 90
+    elif side == 1:
+        robotX = c
+        robotY = a
+        robotAngle = robotAngle #doesn't change
+    elif side == 2:
+        robotX = arenaSize-a
+        robotY = c
+        robotAngle = 90 + robotAngle
+    else:
+        robotX = arenaSize-c
+        robotY = arenaSize-a
+        robotAngle = 180 + robotAngle
+    lastPositionTimestamp = m.timestamp
+
+def getDriveSpeed():
+    if len(driveSpeeds) >= cubeCount:
+        mmPerS = driveSpeeds[cubeCount]
+    else:
+        mmPerS = driveSpeeds[len(driveSpeeds)-1]#
+    return mmPerS
+
+def timeToDrive(dist):
+  mmPerS = getDriveSpeed()
+  seconds = dist/mmPerS
+  print seconds
+  return seconds
+
+def findDistance(seconds):
+  mmPerS = getDriveSpeed()
+  dist = mmPerS*seconds
+  return dist
+
+def timeToTurn(angle):  #This turns a given angle.
+    if angle < 0:
+      seconds = angle/30
+    else:
+      seconds = 0.0363*angle**0.711
+    return seconds
+
+def turn(angle):  #This turns a given angle.
+    global robotAngle
+    if angle > 180:
+        angle -= 360
+    elif angle < -180:
+        angle += 360
+ 
+    seconds = timeToTurn(angle)
+    if angle < 0:
+      R.motors[2] = speed + delta*2
+      time.sleep(abs(seconds))
+      R.motors[2] = 0
+    else:
+      R.motors[1] = speed + delta
+      time.sleep(seconds)
+      R.motors[1] = 0
+    robotAngle = robotAngle + angle
+    while robotAngle > 360:
+        robotAngle = robotAngle - 360
+
+# Collecting the cubes
+def updatePositionFromMarkers(markers):
+  return
+  for m in markers:
+    if m.info.marker_type == robot.MARKER_ARENA:
+      updatePositionFromArena(m)
+      return
+
+def findBestCube(markers):
+  best = None
+  bestScore = 0
+  print len(markers)
+  for m in markers:
+    if m.info.marker_type == robot.MARKER_TOKEN and (isTesting or m.info.token_type != robot.TOKEN_FOOLS_GOLD):
+      (angle, dist) = (m.rot_y, adjustDist(m))
+      if isWhale:
+        turnTime = timeToTurn(angle)
+        driveTime = timeToDrive(dist)
+        seconds = turnTime + driveTime
+        score = -seconds
+#        if m.info.token_type == robot.TOKEN_GOLD:
+            #Always choose gold if we can see it
+#            score = score + 1000
+      else:
+        if m.info.token_type == robot.TOKEN_GOLD:
+          score = 7/dist
+        else: #m.info.token_type == robot.TOKEN_ORE:
+          score = 5/dist
+
+      #Choose the highest score, but only match the first entry        
+      if best == None or (score > bestScore and best.info.code != m.info.code):
+        best = m
+        bestScore = score
+  
+  return best
+
+def collectCube():
+  global cubeCount
+  stopDriving()
+  if isWhale:
+    cubeCount += 1
+  elif isCrab:
+    CrabArms.collect_cube()
+    cubeCount += 1
+    #try and grab the cube with the arm
+
+def driveToCube(m, stoppingDistance):
+  #This could adjust for the center of the cube, but simpler, and possibly better
+  #to aim for the center of the face
+  targetDist = adjustDist(m) + stoppingDistance
+  targetAngle  = m.rot_y
+  code = m.info.code
+  i = 0
+  while targetDist >= drivingStepDistance:
+    if i > isStuckNumber:
+      panic()
+      return
+    #If a long distance away and time to go home then stop
+    if time.time() > homeTime:
+        print "Ran out of time getting cube"
+        return
+    print "targetDist: {0}, timeToDrive targetDist: {1}" .format(targetDist,timeToDrive(targetDist))
+
+    if abs(targetAngle) >= minTurnAngle:
+      turn(targetAngle)
+      print "turned {0} degrees".format(targetAngle)
+      targetAngle = 0
+
+    print "started driving {0} mm".format(drivingStepDistance)
+
+    drive(drivingStepDistance)
+    time.sleep(0.2)
+    newMarkers = R.see()
+
+    updatePositionFromMarkers(newMarkers)
+
+    distanceTravelled = drivingStepDistance
+    
+    updated = False
+    for m2 in newMarkers:
+      if m2.info.code == code:
+        print "found it"
+        targetDist = adjustDist(m2) + stoppingDistance
+        targetAngle = m2.rot_y
+        updated = True
+        print "ta: {0}, td: {1}".format(targetAngle,targetDist)
+        break
+
+    print "Was {0} travelled {1}".format(targetDist, distanceTravelled)
+
+    if not updated and targetDist > minViewingDistance and targetDist < maxViewingDistance:
+
+      if (m.info.marker_type != robot.MARKER_ARENA):
+        drive(lostCubeDistance)
+      print "Lost the cube"
+      return
+
+    if not updated:
+      #cube could be too far away to be seen
+      #Could use the difference in robot position calculated from the edge markers
+      targetDist -= distanceTravelled
+
+    print "The cube is {0} mm away".format(targetDist)
+    print "targetDist: {0}, timeToDrive targetDist: {1}" .format(targetDist,timeToDrive(targetDist))
+    i += 1
+
+  turn(targetAngle)
+  print "turned"
+  drive(targetDist)
+  print "driven"
+  collectCube()
+  print "collected"
+
+def panic():
+    print "AAAAAHHHHH (I'm panicking)"
+    for i in range(5):
+        drive(panicDist)
+        turn(panicAngle)
+        drive(-panicDist)
+        turn(-panicAngle)
+
+def collectCubes():
+  print "collecting {0}"
+  angleTurned = 0
+  while time.time() < homeTime  and cubeCount < maxCubeCount:
+    markers = R.see(res=(1920,1440))
+    checkWallProximity()
+    updatePositionFromMarkers(markers)
+    nextCube = findBestCube(markers)
+    if nextCube != None:
+      print "Found a tasty cube to swallow. Yum!"
+      angleTurned = 0
+      driveToCube(nextCube,distance_to_collection_point)
+    elif angleTurned > isStuckAngle:
+      panic()
+    else:
+      print "No cubes found - turning"
+      turn(fieldOfView)
+      angleTurned += fieldOfView
+      time.sleep(0.3)
+
+  print "Finished collecting {0} {1}/{2}".format(time.time()-homeTime, cubeCount, maxCubeCount)
+
+#Code to return home:
+def findAAndD(x,y):  #This finds the angle and distance you need to go to get to your x,y coordinates.
+    global robotX
+    global robotY
+    global robotAngle
+    a = x-robotX
+    b = y-robotY
+    c = math.degrees(math.atan(a/b))
+    dist = math.sqrt((a*a)+(b*b))
+    angle = 90+c-robotAngle
+    return (angle,dist)
+
+def driveToCoords((x,y)):
+  while True:
+    lookAndUpdatePosition(res=(1920,1440))
+    (angle,dist) = findAAndD(x,y)
+    if (dist < 100):
+        return
+    print "x:{0}, y:{1}, heading: {2},{3}, ang:{4}, dist{5}, robotAng:{6}"\
+                .format(robotX,robotY,x,y,angle,dist,robotAngle)
+    turn(angle)
+    print "turned"
+    drive(min(drivingStepDistance,dist))
+    print "driven"
+
+
+def drive(dist): #This drives a given distance.
+    global robotX
+    global robotY
+    seconds = timeToDrive(dist)
+    if seconds >= 0:
+        R.motors[1] = speed - delta
+        R.motors[2] = speed + delta
+        time.sleep(seconds)
+    else:
+        R.motors[1] = -(speed - delta)
+        R.motors[2] = -(speed + delta)
+        time.sleep(-seconds)
+    stopDriving()
+#    a = dist*math.sin(math.radians(robotAngle))
+#    b = dist*math.cos(math.radians(robotAngle))
+#    robotX = robotX+a
+#    robotY = robotY-b
+
+def alterRoute(route):  #This changes the route of coordinates to account for your zone.
+    if R.zone == 1:
+        for point in route:
+            point.reverse()
+            point[1] = arenaSize - point[1]
+    elif R.zone == 2:
+        for point in route:
+            point[0] = arenaSize - point[0]
+            point[1] = arenaSize - point[1]
+    elif R.zone == 3:
+        for point in route:
+            point.reverse()
+            point[0] = arenaSize - point[0]
+    return route
+
+def lookAndUpdatePosition(res):   #This looks and updates position from any edge markers.
+    markers = R.see(res)
+    updatePositionFromMarkers(markers)
+
+def startDriving(dist):  #This starts you driving for a certain amount of time to go a specified distance.
+    global driving
+    seconds = timeToDrive(dist)
+    if seconds >= 0:
+        R.motors[1] = speed - delta
+        R.motors[2] = speed + delta
+    else:
+        R.motors[1] = -(speed - delta)
+        R.motors[2] = -(speed + delta)
+    driving = True
+
+def stopDriving(): #This stops you driving.
+    global driving
+    if isWhale:
+      R.motors[1] = 0
+      R.motors[2] = 0
+    elif isCrab:
+      R.motors[1] = 50
+      R.motors[2] = 50
+      time.sleep(0.1)
+      R.motors[1] = 30
+      R.motors[2] = 30
+      time.sleep(0.1)
+      R.motors[1] = 20
+      R.motors[2] = 20
+      time.sleep(0.1)
+      R.motors[1] = 10
+      R.motors[2] = 10
+      time.sleep(0.1)
+      R.motors[1] = 0
+      R.motors[2] = 0
+    driving = False
+    updatePosition()
+
+def updatePosition():  #This updates your x,y coordinates based on your speed.
+    global lastPositionTimestamp
+    global robotX
+    global robotY
+    nowTime = time.time()
+    seconds = nowTime - lastPositionTimestamp
+    dist = findDistance(seconds)
+    a = dist*math.sin(math.radians(robotAngle))
+    b = dist*math.cos(math.radians(robotAngle))
+    robotX = robotX+a
+    robotY = robotY-b
+    lastPositionTimestamp = nowTime
+
+#These functions are used when driving home
+def chooseHomeroute():
+  if R.zone == 0:
+    if robotY < arenaSize/2:
+      homeRoute = homeRouteA
+    else:
+      homeRoute = homeRouteB
+  elif R.zone == 1:
+    if robotX > arenaSize/2:
+      homeRoute = homeRouteA
+    else:
+      homeRoute = homeRouteB
+  elif R.zone == 2:
+    if robotY > arenaSize/2:
+      homeRoute = homeRouteA
+    else:
+      homeRoute = homeRouteB
+  else:
+    if robotY < arenaSize/2:
+      homeRoute = homeRouteA
+    else:
+      homeRoute = homeRouteB
+  return homeRoute
+
+'''def returnHomeWithRoute():  #This is the final stage - parking.
+    #THIS NEEDS MORE WORK!!!!!!!!!!!!!!!!!! Maybe not now? Hopefully not? Please?
+    global roundLength
+    global startTime
+    print "hi"
+    lookAndUpdatePosition(res=(1920,1440))
+    homeRoute = chooseHomeroute()
+    homeRoute = alterRoute(homeRoute)
+    for point in homeRoute:
+      driveToCoords(point)
+      print "x:{0}, y:{1}".format(robotX,robotY)'''
+
+def findCode():
+    if R.zone == 0:
+        code = 6
+    if R.zone == 0:
+        code = 12
+    if R.zone == 0:
+        code = 18
+    else:
+        code = 0
+
+def finalTurns():
+    markers = R.see(res=(1920,1440))
+    findCode()
+    for m in markers:
+        if m.info.code == code:
+            marker = m
+            angle = -25
+            while marker.rot_y > angle:
+                turn(20)
+                time.sleep(0.3)
+                markers = R.see(res = (1920,1440))
+                for m in markers:
+                    if m.info.code == code:
+                        marker = m
+    
+def checkWallProximity():
+    tempList = [i for i in R.see() if i.info.marker_type == robot.MARKER_ARENA]
+    for a in tempList:
+        if adjustDist(a) < 500:
+            drive(-500)
+
+def returnHomeWithMarkers():
+    if isWhale:
+      distance_before_parking = robotWidth #distance to sopt before running the parking function
+    else:
+      distance_before_parking = 1 #distance to sopt before running the parking function
+    # returns home by looking for the home markers on the visible walls
+    angleTurned = 0
+
+    while True:
+      # take a picture at the highest resolution
+      markers = R.see(res=(1920,1440))
+      for m in markers:
+        if m.info.code in home_markers:
+          driveToCube(m,-distance_before_parking)
+          turn(115)
+          finalTurns()
+          return
+               
+      # turn the robot a little bit 
+      if angleTurned > isStuckAngle:
+        panic()
+      else:
+        angleTurned += fieldOfView
+        turn(fieldOfView/2)
+        time.sleep(0.3)
+
+def enterArena():
+  print "entering"
+  drive(200)
+  turn(-15)
+  drive(1300)
+  print "entered"
+
+def main():  #This is the main function.
+    print R.zone
+    if not isTesting:
+      print "hi"
+      enterArena()
+    collectCubes()
+    if isWhale:
+      print "Hello, I am a whale."
+      returnHomeWithMarkers()
+      #returnHomeWithRoute()
+    else:
+      returnHomeWithMarkers()
+    print "Robot stopped after {0} seconds!".format(time.time() - startTime)
+
+main()                                                                                                       
